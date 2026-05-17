@@ -1,6 +1,6 @@
 # backend/agent.py
 import os
-from typing import Annotated, List, Any
+from typing import Annotated, List, Any, Dict
 import operator
 from langgraph.graph import StateGraph, END
 from langchain.agents import create_agent
@@ -16,9 +16,9 @@ load_dotenv()
 
 # 定义智能体的状态
 class AgentState(BaseModel):
-    emails: List[dict]  # 未读邮件列表
-    processed_results: Annotated[List[dict], operator.add]  # 处理结果列表
-    actions: Annotated[List[str], operator.add]  # 操作日志
+    emails: List[Dict[str, Any]]
+    processed_results: List[Dict[str, Any]]
+    actions: List[str]
 
 
 # 定义 Agent 输入模型（BaseModel 工业化做法）
@@ -36,10 +36,59 @@ def create_email_agent():
     )
 
     system_prompt = SystemMessage(content="""
-你是一个专业的邮件助理。你的任务是处理用户的未读邮件。
-1. 对于正常邮件，生成一个简洁、礼貌的回复草稿。
-2. 将垃圾邮件或无关紧要的邮件内容忽略。
-""")
+    你是一个专业的邮件助理，专门处理用户的未读邮件。
+
+    输入格式：每封邮件会提供“发件人”、“主题”、“正文”。请根据这些信息判断。
+
+    任务：
+    1. 对于需要用户回复的正常邮件（如来自同事、朋友、客户、邀请、咨询等），生成一个简洁、礼貌的回复草稿。
+    2. 对于垃圾邮件、广告、诈骗邮件，回复草稿固定为 "不需要回复"。
+    3. 对于系统通知类邮件（如密码重置、登录提醒、账户验证、安全提醒等），回复草稿固定为 "不需要回复"。
+    4. 对于欢迎/订阅邮件（如注册欢迎、订阅确认、活动推荐等），回复草稿固定为 "不需要回复"。
+    5. 如果无法明确判断邮件类型，classification 设为 "unknown"，reply_draft 设为 "需要人工处理"。
+
+    输出格式：
+    必须严格输出一个 JSON 对象，只包含两个字段，不要输出其他内容。
+    {
+      "reply_draft": "生成的回复草稿 或 '不需要回复' 或 '需要人工处理'",
+      "classification": "正常邮件" | "垃圾邮件" | "系统通知" | "欢迎邮件" | "unknown"
+    }
+
+    严格要求：
+    - 只输出纯文本 JSON，不要使用 Markdown 代码块。
+    - JSON 必须有效，字符串使用双引号；如果草稿内包含双引号，请使用反斜杠转义（\"）。
+    - 不要输出任何解释、注释或多余空格/换行。
+    - 返回classification的时候必须是我给你的5种情况之一(非常重要)
+
+    示例：
+    输入：
+    发件人: "张三" <zhangsan@example.com>
+    主题: 关于下周的会议
+    正文: 我们下周一开会，你能参加吗？
+    输出：
+    {"reply_draft": "您好，我可以参加下周一的会议。谢谢提醒。", "classification": "正常邮件"}
+
+    输入：
+    发件人: GitHub <noreply@github.com>
+    主题: [GitHub] Your password was reset
+    正文: Hello, your password was reset...
+    输出：
+    {"reply_draft": "不需要回复", "classification": "系统通知"}
+
+    输入：
+    发件人: "某某理财" <ad@spam.com>
+    主题: 免费领取100万奖金
+    正文: 点击链接领取...
+    输出：
+    {"reply_draft": "不需要回复", "classification": "垃圾邮件"}
+
+    输入：
+    发件人: Docker <welcome@docker.com>
+    主题: 欢迎加入 Docker！
+    正文: 你现在已经可以使用 Docker 平台...
+    输出：
+    {"reply_draft": "不需要回复", "classification": "欢迎邮件"}
+    """)
 
     # 使用 create_agent 声明式配置
     agent = create_agent(
@@ -51,82 +100,93 @@ def create_email_agent():
 
     # 工作流节点
     def fetch_emails(state: AgentState) -> dict:
-        """节点1：获取所有未读邮件。"""
         print("📧 获取未读邮件...")
         emails = get_unread_emails.invoke({})
+        print(f"📧 未读邮件数量: {len(emails)}")
+        for i, email in enumerate(emails, 1):
+            print(f"邮件 {i}: 发件人={email['from']}, 主题={email['subject']}")
         return {"emails": emails, "actions": ["获取未读邮件"]}
 
     def process_emails(state: AgentState) -> dict:
-        state_dict = dict(state)  # BaseModel 转 dict
+        state_dict = state.model_dump()
         results = []
 
-        for email in state_dict["emails"]:
-            email_input_text = f"发件人: {email['from']}\n主题: {email['subject']}\n正文: {email['body']}"
-            agent_input_info = {
-                "system": system_prompt.content,
-                "user": email_input_text
-            }
-
-            debug_info = {
-                "input_to_model": agent_input_info,
-                "raw_output": None,
-                "parsed_json": None,
-                "error": None
-            }
-
+        for idx, email in enumerate(state_dict["emails"], start=1):
             try:
-                # 调用 agent
-                raw = agent.invoke({
-                    "messages": [
-                        {"role": "system", "content": system_prompt.content},
-                        {"role": "user", "content": email_input_text}
-                    ]
-                })
+                email_text = f"发件人: {email['from']}\n主题: {email['subject']}\n正文: {email['body']}"
+                agent_input = EmailAgentInput(message=email_text)
 
-                debug_info["raw_output"] = raw  # 直接记录返回的 dict
-
-                # 提取 AIMessage
-                messages = raw.get("messages", [])
-                ai_msgs = [m for m in messages if m.__class__.__name__ == "AIMessage"]
-
-                if ai_msgs:
-                    text = ai_msgs[-1].content
-                else:
-                    text = ""
-                    debug_info["error"] = "未找到 AIMessage"
-
-                # 清理 Markdown ```json ```
-                text_clean = re.sub(r"```json|```", "", text).strip()
-
-                # 尝试解析 JSON
+                # 调用 LLM
                 try:
-                    parsed = json.loads(text_clean)
-                    debug_info["parsed_json"] = parsed
+                    raw = agent.invoke({
+                        "messages": [
+                            {"role": "system", "content": system_prompt.content},
+                            {"role": "user", "content": email_text}
+                        ]
+                    })
                 except Exception as e:
-                    parsed = {}
-                    debug_info["error"] = f"JSON 解析失败: {e}"
+                    raw = None
+                    print(f"❌ 调用 agent.invoke 时失败: {e}")
 
+                llm_text = ""
+                parsed = {}
+
+                if raw:
+                    try:
+                        # 如果 raw 是 dict 且有 messages
+                        messages = getattr(raw, "messages", None) or raw.get("messages", None)
+                        if messages:
+                            # 找到 AIMessage
+                            ai_msg = next((m for m in messages if getattr(m, "type", None) == "ai"), None)
+                            if ai_msg:
+                                llm_text = getattr(ai_msg, "content", str(ai_msg))
+                            else:
+                                # 没有 AIMessage 就直接尝试取 raw.content
+                                llm_text = getattr(raw, "content", str(raw))
+                        else:
+                            # 直接取 content
+                            llm_text = getattr(raw, "content", str(raw))
+
+                        # 尝试解析 JSON
+                        parsed = json.loads(re.sub(r"```json|```", "", llm_text).strip())
+                    except Exception as e:
+                        parsed = {}
+                        print(f"JSON 解析失败: {e}")
+
+                reply_draft = parsed.get("reply_draft", "[无法生成回复]")
+                classification = parsed.get("classification", "unknown")
+
+                # 构建结果
                 results.append({
-                    "original_email_id": email["id"],
-                    "original_subject": email["subject"],
-                    "reply_draft": parsed.get("reply_draft", "[无法生成回复]"),
-                    "classification": parsed.get("classification", "unknown"),
-                    "raw_content": text,
-                    "debug_info": debug_info
+                    "original_email_id": email.get("id"),
+                    "original_subject": email.get("subject"),
+                    "reply_draft": reply_draft,
+                    "classification": classification,
+                    "raw_content": llm_text,
+                    "debug_info": {
+                        "input_to_model": {"system": system_prompt.content, "user": email_text},
+                        "raw_output": raw,
+                        "parsed_json": parsed if parsed else None,
+                        "error": locals().get("error", None)
+                    }
                 })
 
             except Exception as e:
-                debug_info["error"] = str(e)
                 results.append({
                     "original_email_id": email.get("id"),
                     "original_subject": email.get("subject", "[未知]"),
                     "reply_draft": "[处理失败]",
                     "classification": "error",
-                    "raw_content": "",
-                    "debug_info": debug_info
+                    "raw_content": str(e),
+                    "debug_info": {}
                 })
 
-        return {"processed_results": results, "actions": ["批量处理邮件"]}
+        state.processed_results = results
+
+        return {
+            "message": f"成功处理了 {len(results)} 封邮件",
+            "processed_results": results  # 这里必须是 processed_results
+        }
 
     def should_continue(state: AgentState) -> str:
         """条件路由：有邮件继续处理，否则结束"""

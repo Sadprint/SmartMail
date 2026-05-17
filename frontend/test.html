@@ -1,45 +1,54 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>邮件 AI 测试页面</title>
-  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<meta charset="UTF-8">
+<title>邮件测试</title>
+<style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .email { border-bottom: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
+    .debug { background: #f9f9f9; padding: 10px; margin-top: 5px; display: none; white-space: pre-wrap; font-size: 13px; }
+    button { margin-top: 5px; }
+</style>
 </head>
 <body>
-  <h1>智能邮件助手测试</h1>
-  <button id="fetchBtn">获取未读邮件</button>
-  <pre id="output" style="white-space: pre-wrap; background: #f5f5f5; padding: 1rem;"></pre>
+<h1>邮件测试</h1>
+<button id="fetchBtn">获取邮件</button>
+<div id="output"></div>
 
-  <script>
-    const output = document.getElementById('output');
-    const fetchBtn = document.getElementById('fetchBtn');
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script>
+const fetchBtn = document.getElementById("fetchBtn");
+const output = document.getElementById("output");
 
-    fetchBtn.onclick = async () => {
-      output.textContent = "⏳ 正在获取...";
-      try {
-        const res = await axios.get('http://localhost:8000/api/emails/process');
+fetchBtn.onclick = async () => {
+    output.innerHTML = "加载中...";
+    try {
+        const res = await axios.get("http://localhost:8000/api/emails/process");
         const data = res.data;
-
-        output.textContent = "📦 后端返回原始 JSON:\n" + JSON.stringify(data, null, 2) + "\n\n";
-
-        if(data.results && data.results.length > 0){
-          data.results.forEach((email, idx) => {
-            output.textContent += `📧 邮件 ${idx + 1}\n`;
-            output.textContent += `主题: ${email.original_subject}\n`;
-            output.textContent += `分类: ${email.classification}\n`;
-            output.textContent += `AI 回复草稿: ${email.reply_draft}\n`;
-            if(email.raw_content) output.textContent += `LLM 原始输出: ${email.raw_content}\n`;
-            output.textContent += "-".repeat(60) + "\n";
-          });
-        } else {
-          output.textContent += "⚠️ 没有处理结果";
-        }
-
-      } catch (err) {
+        output.innerHTML = `<h2>${data.message}</h2>`;
+        data.results.forEach((email, idx) => {
+            const emailDiv = document.createElement("div");
+            emailDiv.className = "email";
+            emailDiv.innerHTML = `
+                <strong>📧 邮件 ${idx + 1}</strong><br>
+                <strong>主题:</strong> ${email.original_subject}<br>
+                <strong>分类:</strong> ${email.classification}<br>
+                <strong>AI 回复草稿:</strong> ${email.reply_draft}<br>
+                <button onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+                    展开 / 折叠 LLM 原始输出与 Debug
+                </button>
+                <div class="debug">
+                    <strong>LLM 原始输出:</strong>\n${email.raw_content}\n\n
+                    <strong>Debug 信息:</strong>\n${JSON.stringify(email.debug_info, null, 2)}
+                </div>
+            `;
+            output.appendChild(emailDiv);
+        });
+    } catch (err) {
+        output.innerHTML = "❌ 获取失败，请检查后端是否运行或 CORS 设置。";
         console.error(err);
-        output.textContent = "❌ 获取失败，请检查后端是否运行\n" + err;
-      }
     }
-  </script>
+};
+</script>
 </body>
 </html>

@@ -1,13 +1,26 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import EmailDashboard from '../views/EmailDashboard.vue'
+import AppLayout from '@/layouts/AppLayout.vue'
+import EmailDashboard from '@/views/EmailDashboard.vue'
 
 const routes = [
-  { path: '/', component: EmailDashboard },
+  {
+    path: '/',
+    component: AppLayout,
+    children: [
+      {
+        path: '',          // 空路径表示 / 下直接渲染 EmailDashboard
+        name: 'Dashboard',
+        component: EmailDashboard
+      }
+      // 未来增加其他子路由，如：
+      // { path: 'settings', component: Settings }
+    ]
+  }
 ]
 
 const router = createRouter({
   history: createWebHistory(),
-  routes,
+  routes
 })
 
 export default router

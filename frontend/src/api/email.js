@@ -1,13 +1,5 @@
-import axios from 'axios';
+import request from './request'
 
-const API_BASE = 'http://localhost:8000/api';
-
-export async function processEmails() {
-  try {
-    const response = await axios.get(`${API_BASE}/emails/process`);
-    return response.data;
-  } catch (err) {
-    console.error('处理邮件失败:', err);
-    throw err;
-  }
+export const fetchProcessedEmails = () => {
+  return request.get('/api/emails/process')
 }

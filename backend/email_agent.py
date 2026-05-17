@@ -1,15 +1,18 @@
-# backend/agent.py
+# backend/email_agent.py
+import json
 import os
-from typing import Annotated, List, Any, Dict
-import operator
-from langgraph.graph import StateGraph, END
-from langchain.agents import create_agent
-from langchain_core.messages import SystemMessage
-from langchain_community.chat_models import ChatZhipuAI
-from .email_client import get_unread_emails, send_reply
+import re
+from typing import List, Any, Dict
+
 from dotenv import load_dotenv
+from langchain.agents import create_agent
+from langchain_community.chat_models import ChatZhipuAI
+from langchain_core.messages import SystemMessage
+from langgraph.graph import StateGraph, END
 from pydantic import BaseModel
-import re, json
+
+from .config import EMAIL_SYSTEM_PROMPT
+from .email_client import get_unread_emails, send_reply
 
 load_dotenv()
 
@@ -35,61 +38,7 @@ def create_email_agent():
         api_key=os.getenv("ZHIPUAI_API_KEY"),
     )
 
-    system_prompt = SystemMessage(content="""
-    你是一个专业的邮件助理，专门处理用户的未读邮件。
-
-    输入格式：每封邮件会提供“发件人”、“主题”、“正文”。请根据这些信息判断。
-
-    任务：
-    1. 对于需要用户回复的正常邮件（如来自同事、朋友、客户、邀请、咨询等），生成一个简洁、礼貌的回复草稿。
-    2. 对于垃圾邮件、广告、诈骗邮件，回复草稿固定为 "不需要回复"。
-    3. 对于系统通知类邮件（如密码重置、登录提醒、账户验证、安全提醒等），回复草稿固定为 "不需要回复"。
-    4. 对于欢迎/订阅邮件（如注册欢迎、订阅确认、活动推荐等），回复草稿固定为 "不需要回复"。
-    5. 如果无法明确判断邮件类型，classification 设为 "unknown"，reply_draft 设为 "需要人工处理"。
-
-    输出格式：
-    必须严格输出一个 JSON 对象，只包含两个字段，不要输出其他内容。
-    {
-      "reply_draft": "生成的回复草稿 或 '不需要回复' 或 '需要人工处理'",
-      "classification": "正常邮件" | "垃圾邮件" | "系统通知" | "欢迎邮件" | "unknown"
-    }
-
-    严格要求：
-    - 只输出纯文本 JSON，不要使用 Markdown 代码块。
-    - JSON 必须有效，字符串使用双引号；如果草稿内包含双引号，请使用反斜杠转义（\"）。
-    - 不要输出任何解释、注释或多余空格/换行。
-    - 返回classification的时候必须是我给你的5种情况之一(非常重要)
-
-    示例：
-    输入：
-    发件人: "张三" <zhangsan@example.com>
-    主题: 关于下周的会议
-    正文: 我们下周一开会，你能参加吗？
-    输出：
-    {"reply_draft": "您好，我可以参加下周一的会议。谢谢提醒。", "classification": "正常邮件"}
-
-    输入：
-    发件人: GitHub <noreply@github.com>
-    主题: [GitHub] Your password was reset
-    正文: Hello, your password was reset...
-    输出：
-    {"reply_draft": "不需要回复", "classification": "系统通知"}
-
-    输入：
-    发件人: "某某理财" <ad@spam.com>
-    主题: 免费领取100万奖金
-    正文: 点击链接领取...
-    输出：
-    {"reply_draft": "不需要回复", "classification": "垃圾邮件"}
-
-    输入：
-    发件人: Docker <welcome@docker.com>
-    主题: 欢迎加入 Docker！
-    正文: 你现在已经可以使用 Docker 平台...
-    输出：
-    {"reply_draft": "不需要回复", "classification": "欢迎邮件"}
-    """)
-
+    system_prompt = SystemMessage(content=EMAIL_SYSTEM_PROMPT)
     # 使用 create_agent 声明式配置
     agent = create_agent(
         model=llm,
@@ -163,6 +112,7 @@ def create_email_agent():
                     "reply_draft": reply_draft,
                     "classification": classification,
                     "raw_content": llm_text,
+                    "stage": "initial",
                     "debug_info": {
                         "input_to_model": {"system": system_prompt.content, "user": email_text},
                         "raw_output": raw,

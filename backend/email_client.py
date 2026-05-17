@@ -12,8 +12,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class EmailClient:
     """封装所有与邮件服务器交互的底层细节。"""
+
     def __init__(self):
         self.email_account = os.getenv("EMAIL_ACCOUNT")
         self.email_password = os.getenv("EMAIL_PASSWORD")
@@ -114,12 +116,14 @@ class EmailClient:
             print(f"邮件发送失败: {e}")
             return False
 
+
 # 将邮件操作包装成 LangChain 工具
 @tool
 def get_unread_emails() -> List[Dict[str, Any]]:
     """获取邮箱中所有未读的邮件。"""
     client = EmailClient()
     return client.get_unread_emails()
+
 
 @tool
 def send_reply(to_email: str, original_subject: str, reply_content: str) -> bool:

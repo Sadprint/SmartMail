@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>邮件 AI 测试页面</title>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+  <h1>智能邮件助手测试</h1>
+  <button id="fetchBtn">获取未读邮件</button>
+  <pre id="output" style="white-space: pre-wrap; background: #f5f5f5; padding: 1rem;"></pre>
+
+  <script>
+    const output = document.getElementById('output');
+    const fetchBtn = document.getElementById('fetchBtn');
+
+    fetchBtn.onclick = async () => {
+      output.textContent = "⏳ 正在获取...";
+      try {
+        const res = await axios.get('http://localhost:8000/api/emails/process');
+        const data = res.data;
+
+        output.textContent = "📦 后端返回原始 JSON:\n" + JSON.stringify(data, null, 2) + "\n\n";
+
+        if(data.results && data.results.length > 0){
+          data.results.forEach((email, idx) => {
+            output.textContent += `📧 邮件 ${idx + 1}\n`;
+            output.textContent += `主题: ${email.original_subject}\n`;
+            output.textContent += `分类: ${email.classification}\n`;
+            output.textContent += `AI 回复草稿: ${email.reply_draft}\n`;
+            if(email.raw_content) output.textContent += `LLM 原始输出: ${email.raw_content}\n`;
+            output.textContent += "-".repeat(60) + "\n";
+          });
+        } else {
+          output.textContent += "⚠️ 没有处理结果";
+        }
+
+      } catch (err) {
+        console.error(err);
+        output.textContent = "❌ 获取失败，请检查后端是否运行\n" + err;
+      }
+    }
+  </script>
+</body>
+</html>

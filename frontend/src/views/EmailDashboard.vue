@@ -2,18 +2,22 @@
   <div class="dashboard">
     <!-- 顶部工具栏 -->
     <div class="toolbar">
-      <button @click="fetchEmails" :disabled="loading" class="fetch-btn">
-        {{ loading ? '获取中...' : '获取邮件' }}
-      </button>
+      <div class="toolbar-left">
+        <button @click="fetchEmails" :disabled="loading" class="fetch-btn">
+          {{ loading ? '处理中...' : '📥 更新邮件' }}
+        </button>
+        <button @click="loadLocalEmails" :disabled="loading" class="local-btn">
+          📂 读取本地邮件
+        </button>
+      </div>
       <div v-if="emailList.length" class="info">
         共 {{ emailList.length }} 封邮件
       </div>
     </div>
 
     <!-- 主体 -->
-    <div v-if="loading" class="loading-state">加载中，请稍候...</div>
+    <div v-if="!emailList.length && !error" class="empty-state">暂无邮件，点击上方按钮获取</div>
     <div v-else-if="error" class="error-state">{{ error }}</div>
-    <div v-else-if="!emailList.length" class="empty-state">暂无邮件，点击上方按钮获取</div>
     <div v-else class="main-layout">
       <!-- 左侧邮件列表 -->
       <aside class="email-list">
@@ -49,6 +53,12 @@
           <div class="field"><strong>主题:</strong> {{ currentEmail.original_subject }}</div>
           <div class="field"><strong>分类:</strong> {{ currentEmail.classification }}</div>
 
+          <!-- 原始邮件内容 -->
+          <div class="field">
+            <strong>原始邮件:</strong>
+            <div class="email-body">{{ currentEmail.body || '(无正文内容)' }}</div>
+          </div>
+
           <!-- AI 回复草稿编辑 -->
           <div class="field">
             <strong>AI 回复草稿:</strong>
@@ -62,6 +72,17 @@
               </button>
             </div>
             <div v-if="currentEmail.sent" class="sent-info">已发送 ✅</div>
+
+            <!-- LLM 收到的完整消息（调试） -->
+            <div v-if="currentEmail.debug_messages?.length" class="debug-section">
+              <details>
+                <summary>📋 LLM 收到的消息 ({{ currentEmail.debug_messages.length }} 条)</summary>
+                <div v-for="(msg, i) in currentEmail.debug_messages" :key="i" class="debug-msg">
+                  <div class="debug-role">{{ msg.role }}</div>
+                  <pre class="debug-content">{{ msg.content }}</pre>
+                </div>
+              </details>
+            </div>
           </div>
         </div>
       </main>
@@ -97,33 +118,52 @@ const originalIndex = (filteredIndex) => {
 // 当前邮件
 const currentEmail = computed(() => emailList.value[currentIdx.value] || {})
 
-// 获取邮件
+// 切换邮件
+const selectEmail = (idx) => { currentIdx.value = idx }
+const prevEmail = () => { if (currentIdx.value > 0) currentIdx.value-- }
+const nextEmail = () => { if (currentIdx.value < emailList.value.length - 1) currentIdx.value++ }
+
+// 更新邮件 — 调旧的 LangGraph 流水线
 const fetchEmails = async () => {
   loading.value = true
   error.value = ''
   try {
     const res = await axios.get('/api/emails/process')
-    const data = res.data
-    if (data.results && data.results.length) {
-      emailList.value = data.results.map(e => ({ ...e, reply_draft: e.reply_draft || '', sent: false }))
+    if (res.data.results?.length) {
+      emailList.value = res.data.results.map(e => ({ ...e, reply_draft: e.reply_draft || '', sent: false }))
       currentIdx.value = 0
       searchKeyword.value = ''
     } else {
-      emailList.value = []
-      error.value = '后端返回数据为空'
+      error.value = '没有获取到未读邮件'
     }
   } catch (err) {
-    console.error('fetchEmails 失败:', err)
-    error.value = '请求失败，请检查后端服务或 CORS'
+    console.error('更新邮件失败:', err)
+    error.value = '更新邮件失败，请稍后重试'
   } finally {
     loading.value = false
   }
 }
 
-// 切换邮件
-const selectEmail = (idx) => { currentIdx.value = idx }
-const prevEmail = () => { if (currentIdx.value > 0) currentIdx.value-- }
-const nextEmail = () => { if (currentIdx.value < emailList.value.length - 1) currentIdx.value++ }
+// 读取本地已处理邮件
+const loadLocalEmails = async () => {
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await axios.get('/api/emails/history')
+    if (res.data.results?.length) {
+      emailList.value = res.data.results.map(e => ({ ...e, reply_draft: e.reply_draft || '', sent: !!e.sent }))
+      currentIdx.value = 0
+      searchKeyword.value = ''
+    } else {
+      error.value = '本地暂无已处理邮件'
+    }
+  } catch (err) {
+    console.error('读取本地邮件失败:', err)
+    error.value = '读取本地邮件失败，请稍后重试'
+  } finally {
+    loading.value = false
+  }
+}
 
 // 修改建议（调用 refine 接口）
 const openSuggestionDialog = async () => {
@@ -136,6 +176,7 @@ const openSuggestionDialog = async () => {
       suggestion
     })
     currentEmail.value.reply_draft = response.data.new_reply_draft || currentEmail.value.reply_draft
+    currentEmail.value.debug_messages = response.data.debug_messages || []
     alert('AI 回复已更新！')
   } catch (err) {
     console.error('修改建议失败:', err)
@@ -151,9 +192,10 @@ const submitEmail = async () => {
   sending.value = true
   try {
     await axios.post('/api/emails/send', {
-      to_email: currentEmail.from,
-      original_subject: currentEmail.original_subject,
-      reply_content: replyContent
+      email_id: currentEmail.value.original_email_id || currentEmail.value.email_id || '',
+      to_email: currentEmail.value.from,
+      original_subject: currentEmail.value.original_subject,
+      reply_content: currentEmail.value.reply_draft
     })
 
     currentEmail.value.sent = true
@@ -170,8 +212,12 @@ const submitEmail = async () => {
 <style scoped>
 .dashboard { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.toolbar-left { display: flex; gap: 12px; }
 .fetch-btn { padding: 8px 24px; border-radius: 24px; border: none; background: #667eea; color: white; cursor: pointer; }
 .fetch-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.local-btn { padding: 8px 24px; border-radius: 24px; border: 1px solid #667eea; background: none; color: #667eea; cursor: pointer; }
+.local-btn:hover:not(:disabled) { background: #eef2ff; }
+.local-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .info { font-size: 14px; color: #475569; }
 
 /* 主体布局 */
@@ -197,6 +243,9 @@ const submitEmail = async () => {
 .field { margin-bottom: 16px; line-height: 1.5; }
 .field strong { display: inline-block; width: 100px; color: #475569; }
 
+/* 原始邮件正文 */
+.email-body { margin-top: 4px; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; font-size: 14px; line-height: 1.6; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+
 /* AI 回复草稿 */
 .reply-textarea { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #cbd5e1; resize: vertical; font-size: 14px; font-family: inherit; }
 .buttons { margin-top: 8px; display: flex; gap: 12px; }
@@ -207,7 +256,15 @@ const submitEmail = async () => {
 .suggest-btn:disabled, .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .sent-info { margin-top: 8px; color: #10b981; font-weight: 500; }
 
+/* 调试面板 */
+.debug-section { margin-top: 12px; }
+.debug-section details { border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px; background: #fefce8; }
+.debug-section summary { cursor: pointer; font-size: 13px; color: #92400e; user-select: none; }
+.debug-msg { margin-top: 8px; border-top: 1px dashed #e2e8f0; padding-top: 8px; }
+.debug-role { font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px; text-transform: uppercase; }
+.debug-content { font-size: 12px; line-height: 1.4; white-space: pre-wrap; background: #fffbeb; padding: 8px; border-radius: 4px; max-height: 200px; overflow-y: auto; }
+
 /* 状态样式 */
-.loading-state, .error-state, .empty-state { flex: 1; display: flex; justify-content: center; align-items: center; border-radius: 24px; color: #64748b; background: white; }
+.empty-state, .error-state { flex: 1; display: flex; justify-content: center; align-items: center; border-radius: 24px; color: #64748b; background: white; padding: 40px; }
 .error-state { color: #dc2626; }
 </style>

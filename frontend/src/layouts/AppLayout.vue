@@ -3,13 +3,16 @@
     <aside class="sidebar">
       <div class="logo">📧 SmartMail</div>
       <nav class="nav">
-        <router-link to="/" class="nav-item" active-class="active">邮件处理</router-link>
-        <!-- 未来添加其他功能 -->
-        <!-- <router-link to="/settings" class="nav-item">设置</router-link> -->
+        <router-link to="/chat" class="nav-item" active-class="active">🤖 邮箱智能助手</router-link>
+        <router-link to="/" class="nav-item" exact-active-class="active">📧 邮件管理</router-link>
       </nav>
     </aside>
     <main class="main-content">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <keep-alive>
+          <component :is="Component" />
+        </keep-alive>
+      </router-view>
     </main>
   </div>
 </template>

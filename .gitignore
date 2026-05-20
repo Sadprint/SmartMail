@@ -37,6 +37,7 @@ Thumbs.db
 *.sqlite
 *.db
 
-python-version          # pyenv 本地版本文件，一般无需上传
-test.html               # 看起来是测试文件，根据情况决定是否忽略
+.python-version         # pyenv 本地版本文件
+.claude/                # Claude Code 本地配置
+test.html               # 测试文件
 

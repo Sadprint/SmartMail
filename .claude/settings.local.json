@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/c/Windows/System32/cmd.exe /c \"net start MySQL80\")",
+      "Bash(c:/users/sad/appdata/local/programs/python/python39/python.exe -c \"import subprocess, ctypes; r=subprocess.run\\(['C:/Windows/System32/net.exe','start','MySQL80'], capture_output=True, text=True, shell=True\\); print\\('stdout:', r.stdout\\); print\\('stderr:', r.stderr\\); print\\('rc:', r.returncode\\)\")",
+      "Bash(git ls-files *)"
+    ]
+  }
+}

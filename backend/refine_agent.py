@@ -1,5 +1,6 @@
 # backend/refine_agent.py
 import os
+import re
 import json
 from typing import List, Dict, Any
 
@@ -64,7 +65,12 @@ def create_refine_agent():
                     ai_msg = msg
                     break
         if ai_msg:
-            new_reply_draft = ai_msg.content.strip()
+            content = ai_msg.content.strip()
+            try:
+                parsed = json.loads(re.sub(r"```json|```", "", content).strip())
+                new_reply_draft = parsed.get("reply_draft", "[无法生成回复]")
+            except Exception:
+                new_reply_draft = content or "[无法生成回复]"
 
         # 更新状态
         state.new_reply_draft = new_reply_draft

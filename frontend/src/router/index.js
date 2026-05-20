@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from '@/layouts/AppLayout.vue'
 import EmailDashboard from '@/views/EmailDashboard.vue'
+import ChatAssistant from '@/views/ChatAssistant.vue'
 
 const routes = [
   {
@@ -8,12 +9,15 @@ const routes = [
     component: AppLayout,
     children: [
       {
-        path: '',          // 空路径表示 / 下直接渲染 EmailDashboard
+        path: '',
         name: 'Dashboard',
         component: EmailDashboard
+      },
+      {
+        path: 'chat',
+        name: 'Chat',
+        component: ChatAssistant
       }
-      // 未来增加其他子路由，如：
-      // { path: 'settings', component: Settings }
     ]
   }
 ]

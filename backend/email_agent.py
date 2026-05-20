@@ -12,7 +12,7 @@ from langgraph.graph import StateGraph, END
 from pydantic import BaseModel
 
 from .config import EMAIL_SYSTEM_PROMPT
-from .email_client import get_unread_emails, send_reply
+from .email_client import fetch_unread_emails, send_reply
 
 load_dotenv()
 
@@ -42,7 +42,7 @@ def create_email_agent():
     # 使用 create_agent 声明式配置
     agent = create_agent(
         model=llm,
-        tools=[get_unread_emails, send_reply],
+        tools=[fetch_unread_emails, send_reply],
         system_prompt=system_prompt,
         # 中间件可选：添加速率限制、PII 脱敏等
     )
@@ -50,7 +50,7 @@ def create_email_agent():
     # 工作流节点
     def fetch_emails(state: AgentState) -> dict:
         print("📧 获取未读邮件...")
-        emails = get_unread_emails.invoke({})
+        emails = fetch_unread_emails()
         print(f"📧 未读邮件数量: {len(emails)}")
         for i, email in enumerate(emails, 1):
             print(f"邮件 {i}: 发件人={email['from']}, 主题={email['subject']}")
@@ -109,6 +109,8 @@ def create_email_agent():
                 results.append({
                     "original_email_id": email.get("id"),
                     "original_subject": email.get("subject"),
+                    "from": email.get("from"),
+                    "body": email.get("body", ""),
                     "reply_draft": reply_draft,
                     "classification": classification,
                     "raw_content": llm_text,

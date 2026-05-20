@@ -89,6 +89,8 @@ class EmailClient:
                     "date": date,
                     "body": body[:2000],
                 })
+                # 标记为已读
+                mail.store(e_id, '+FLAGS', '\\Seen')
             return mails_data
         finally:
             mail.close()
@@ -118,15 +120,58 @@ class EmailClient:
 
 
 # 将邮件操作包装成 LangChain 工具
-@tool
-def get_unread_emails() -> List[Dict[str, Any]]:
-    """获取邮箱中所有未读的邮件。"""
+def fetch_unread_emails() -> List[Dict[str, Any]]:
+    """获取所有未读邮件（底层函数，给旧工作流用）。"""
     client = EmailClient()
     return client.get_unread_emails()
 
 
 @tool
-def send_reply(to_email: str, original_subject: str, reply_content: str) -> bool:
-    """发送邮件回复，需要提供收件人、原邮件主题和回复内容。"""
+def get_unread_emails() -> str:
+    """获取邮箱中所有未读的邮件，返回邮件全文摘要（含正文）。无未读邮件时会明确提示。"""
     client = EmailClient()
-    return client.send_reply(to_email, original_subject, reply_content)
+    try:
+        result = client.get_unread_emails()
+        if not result:
+            return "当前没有未读邮件。"
+        lines = [f"共 {len(result)} 封未读邮件：\n"]
+        for i, m in enumerate(result, 1):
+            body_preview = m['body'][:1500] if m.get('body') else '(无正文)'
+            lines.append(
+                f"--- 邮件 {i} ---\n"
+                f"ID: {m['id']}\n"
+                f"发件人: {m['from']}\n"
+                f"主题: {m['subject']}\n"
+                f"日期: {m.get('date', '')}\n"
+                f"正文:\n{body_preview}\n"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"获取邮件失败: {str(e)}"
+
+
+@tool
+def send_reply(to_email: str, original_subject: str, reply_content: str, email_id: str = "") -> str:
+    """发送邮件回复。需要收件人、原邮件主题、回复内容，可选 email_id 用于标记本地已发送。返回发送结果文本。"""
+    client = EmailClient()
+    success = client.send_reply(to_email, original_subject, reply_content)
+    if success:
+        if email_id:
+            try:
+                from .database import _get_conn
+                conn = _get_conn()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "INSERT INTO processed_emails (email_id, `from`, original_subject, body, reply_draft, classification, sent) "
+                            "VALUES (%s, %s, %s, %s, %s, %s, 1) "
+                            "ON DUPLICATE KEY UPDATE reply_draft = VALUES(reply_draft), sent = 1",
+                            (email_id, to_email, original_subject, "", reply_content, "正常邮件"),
+                        )
+                        conn.commit()
+                finally:
+                    conn.close()
+            except Exception as e:
+                print(f"更新本地邮件状态失败: {e}")
+        return "邮件已发送成功。"
+    return "邮件发送失败，请稍后重试。"
